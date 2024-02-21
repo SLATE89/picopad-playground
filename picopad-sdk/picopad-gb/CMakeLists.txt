@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(PICO_TOOLCHAIN_PATH /Applications/ARM)
-set(PICO_SDK_PATH ../../pico-sdk)
-set(PICOPAD_BASE_PATH ../../picopad-base)
+set(PICO_TOOLCHAIN_PATH "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/gcc-arm-none-eabi")
+set(PICO_SDK_PATH "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/pico-sdk")
+set(PICOPAD_BASE_PATH "C:/Workspace/Programming/picopad-base")
+
+set(ENABLE_GBC_SUPPORT 1)
 
 set(CMAKE_SIZE ${PICO_TOOLCHAIN_PATH}/bin/arm-none-eabi-size)
 
@@ -40,7 +42,7 @@ target_link_libraries(${PROJECT_NAME}
         picopad_libs
         picopad_machine
         pico_divider
-        )
+        )    
 
 target_link_options(${PROJECT_NAME} PRIVATE LINKER:--gc-sections)
 

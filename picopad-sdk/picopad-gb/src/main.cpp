@@ -2,12 +2,8 @@
 #ifndef PEANUT_FULL_GBC_SUPPORT
 	#define PEANUT_FULL_GBC_SUPPORT 0
 #endif
-#if PEANUT_FULL_GBC_SUPPORT
-// Disable sound
+
 #define ENABLE_SOUND    1
-#else
-#define ENABLE_SOUND    1
-#endif
 
 // Enable LCD
 #define ENABLE_LCD    1
@@ -21,6 +17,7 @@
 #include <pico/stdio.h>
 #include <pico/stdlib.h>
 #include <pico/multicore.h>
+#include <pico/printf.h>
 
 // Peanut GB library
 #include "minigb_apu.h"
@@ -35,6 +32,8 @@
 #include "picopad_key.h"
 #include "sdk_watchdog.h"
 #include "lib_pwmsnd.h"
+#include "lib_fat.h"
+#include "lib_sd.h"
 
 // Button GPIO mapping
 #define GPIO_BUTTON_UP        4 // UP
@@ -47,7 +46,7 @@
 #define GPIO_BUTTON_START     9 // X
 
 #if ENABLE_SOUND
-int16_t *stream;
+    int16_t *stream;
 #endif
 
 // ROM data
@@ -96,9 +95,13 @@ static uint8_t pixelBuffer[LCD_WIDTH];
 // GameBoy context
 static struct gb_s gbContext;
 
+//  SD card prewiev file
+sFile PrevFile;
+
 // GameBoy ROM read function
 uint8_t gbRomRead(struct gb_s *gb, const uint_fast32_t addr) {
     (void) gb;
+    //printf("Address: %d", addr);
     if (addr < sizeof(romBank0))
         return romBank0[addr];
 
@@ -225,6 +228,53 @@ void lcdDrawLine(struct gb_s *gb, const uint8_t pixels[LCD_WIDTH], const uint_fa
     multicore_fifo_push_blocking(cmd.full);
 }
 
+/**
+ * Load a save file from the SD card
+ */
+void read_cart_ram_file(struct gb_s *gb) {
+	char filename[16];
+	uint_fast32_t save_size;
+	
+	gb_get_rom_name(gb,filename);
+	save_size=gb_get_save_size(gb);
+	if(save_size>0) {
+        if (!FileOpen(&PrevFile, filename)) {
+            printf("Cannot open file!");
+        } else {
+            FileRead(&PrevFile, &gameRam, save_size);
+        }
+
+        FileClose(&PrevFile);
+	}
+	printf("I read_cart_ram_file(%s) COMPLETE (%lu bytes)\n",filename,save_size);
+}
+
+/**
+ * Write a save file to the SD card
+ */
+void write_cart_ram_file(struct gb_s *gb) {
+	char filename[16];
+	uint_fast32_t save_size;
+	
+	gb_get_rom_name(gb,filename);
+	save_size=gb_get_save_size(gb);
+	if(save_size>0) {
+        if (!FileOpen(&PrevFile, filename)) {
+            if(!FileCreate(&PrevFile, filename)){
+                printf("Cannot create file!");
+            } else {
+                FileWrite(&PrevFile, &gameRam, save_size);
+            }
+            printf("Cannot open file!");
+        } else {
+            FileWrite(&PrevFile, &gameRam, save_size);
+        }
+
+        FileClose(&PrevFile);
+	}
+	printf("I write_cart_ram_file(%s) COMPLETE (%lu bytes)\n",filename,save_size);
+}
+
 // Main function
 int main() {
     // Variable for storing return status of initialization
@@ -243,31 +293,31 @@ int main() {
         sleep_ms(2);
     }
 
-    // Initialise USB serial connection for debugging
-    stdio_init_all();
-
     // Configure clocks and initialize SPI
     clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, 133000 * 1000, 133000 * 1000);
     // Maximal Pico SPI frequency - 62.5MHz
     spi_init(spi0, 62500000);
     spi_set_format(spi0, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
+    // Initialise USB serial connection for debugging
+    stdio_init_all();
+
     // Initialize the Picopad device
     DeviceInit(true, false);
 
-#if ENABLE_SOUND
-    PWMSndTerm();
-    //  266 MHz: 266000000/5644800 = 47.123, INT=47, FRAC=2,
-    //  real sample rate = 266000000/(47+2/16)/256 = 22049Hz
-    PWMSndInitInternal(47, 2);
-    stream = static_cast<int16_t *>(malloc(AUDIO_BUFFER_SIZE_BYTES));
-    assert(stream != nullptr);
-    memset(stream, 0, AUDIO_BUFFER_SIZE_BYTES);  // Zero out the stream buffer
-    // Allocate space for the mono and resampled stream.
-    // We're assuming AUDIO_SAMPLES is the total number of samples in both channels.
-    auto *monoStream = new uint8_t[AUDIO_SAMPLES];
-    static uint16_t samplesCount = 0;
-#endif
+    #if ENABLE_SOUND
+        PWMSndTerm();
+        //  266 MHz: 266000000/5644800 = 47.123, INT=47, FRAC=2,
+        //  real sample rate = 266000000/(47+2/16)/256 = 22049Hz
+        PWMSndInitInternal(47, 2);
+        stream = static_cast<int16_t *>(malloc(AUDIO_BUFFER_SIZE_BYTES));
+        assert(stream != nullptr);
+        memset(stream, 0, AUDIO_BUFFER_SIZE_BYTES);  // Zero out the stream buffer
+        // Allocate space for the mono and resampled stream.
+        // We're assuming AUDIO_SAMPLES is the total number of samples in both channels.
+        auto *monoStream = new uint8_t[AUDIO_SAMPLES];
+        static uint16_t samplesCount = 0;
+    #endif
 
     // Main game loop
     while (true) {
@@ -284,27 +334,41 @@ int main() {
 
         // Turn ON Peanut GB frame skip
         // You should change based on ROM
-#if PEANUT_FULL_GBC_SUPPORT
-        if (gbContext.cgb.cgbMode)
-            gbContext.direct.interlace = 1;
-        else {
+        #if PEANUT_FULL_GBC_SUPPORT
+            if (gbContext.cgb.cgbMode)
+                gbContext.direct.interlace = 1;
+            else {
+                gbContext.direct.frame_skip = 1;
+                gbContext.display.frame_skip_count = 1;
+            }
+        #else
             gbContext.direct.frame_skip = 1;
             gbContext.display.frame_skip_count = 1;
-        }
-#else
-        gbContext.direct.frame_skip = 1;
-        gbContext.display.frame_skip_count = 1;
-#endif
+        #endif
         // Start Core1, which processes requests to the LCD
         multicore_launch_core1(core1MainFunction);
 
-#if ENABLE_SOUND
-        // Init audio
-        audio_init();
-#endif
+        #if ENABLE_SOUND
+                // Init audio
+                audio_init();
+        #endif
+
+        //  SD card file structure init
+        FileInit(&PrevFile); // initialize file structure of preview file
+
+        /* Load File */
+        read_cart_ram_file(&gbContext);
+        
+        /*
+        for(int i = 0; i < sizeof(romBank0); i++){
+            printf("Address: %d, Data: %x \n", i, romBank0[i]);
+        }
+        */
+
         // Frame count variable
-        uint_fast32_t frameCount = 0;
+        //uint_fast32_t frameCount = 0;
         do {
+            /*
             gbContext.gb_frame = 0;
             do {
                 __gb_step_cpu(&gbContext);
@@ -312,32 +376,36 @@ int main() {
             } while (gbContext.gb_frame == 0);
 
             frameCount++;
+            */
 
-#if ENABLE_SOUND
-            if (!PlayingSound()) {
-                memset(monoStream, 0, AUDIO_SAMPLES);  // Zero out the stream buffer
-                samplesCount = audio_callback(nullptr, stream, AUDIO_BUFFER_SIZE_BYTES);
+            /* Execute CPU cycles until the screen has to be redrawn. */
+            gb_run_frame(&gbContext);
 
-                int j = 0;
-                int32_t mono16BitFiltered = 0;
-                for (int i = 0; i < AUDIO_BUFFER_SIZE_BYTES / 2; i += 2) {
-                    int32_t leftChannel = stream[i];
-                    int32_t rightChannel = stream[i + 1];
+            #if ENABLE_SOUND
+                if (!PlayingSound()) {
+                    memset(monoStream, 0, AUDIO_SAMPLES);  // Zero out the stream buffer
+                    samplesCount = audio_callback(nullptr, stream, AUDIO_BUFFER_SIZE_BYTES);
 
-                    // Average left and right channels to create mono channel.
-                    int32_t mono16Bit = (leftChannel + rightChannel) / 2;
+                    int j = 0;
+                    int32_t mono16BitFiltered = 0;
+                    for (int i = 0; i < AUDIO_BUFFER_SIZE_BYTES / 2; i += 2) {
+                        int32_t leftChannel = stream[i];
+                        int32_t rightChannel = stream[i + 1];
 
-                    // Apply a simple low-pass filter (moving average).
-                    mono16BitFiltered = (mono16BitFiltered + mono16Bit) / 2;
+                        // Average left and right channels to create mono channel.
+                        int32_t mono16Bit = (leftChannel + rightChannel) / 2;
 
-                    // Convert to 8 bits by dropping the least significant 8 bits.
-                    monoStream[j] = static_cast<uint8_t>((mono16BitFiltered + 128) >> 8);
-                    j++;
+                        // Apply a simple low-pass filter (moving average).
+                        mono16BitFiltered = (mono16BitFiltered + mono16Bit) / 2;
+
+                        // Convert to 8 bits by dropping the least significant 8 bits.
+                        monoStream[j] = static_cast<uint8_t>((mono16BitFiltered + 128) >> 8);
+                        j++;
+                    }
+                    // Now monoStream contains the 8-bit mono and resampled audio.
+                    PlaySound(monoStream, AUDIO_SAMPLES);
                 }
-                // Now monoStream contains the 8-bit mono and resampled audio.
-                PlaySound(monoStream, AUDIO_SAMPLES);
-            }
-#endif
+            #endif
             // Update gamepad state
             prevGamepadState.up = gbContext.direct.joypad_bits.up;
             prevGamepadState.down = gbContext.direct.joypad_bits.down;
@@ -358,7 +426,17 @@ int main() {
             gbContext.direct.joypad_bits.start = gpio_get(GPIO_BUTTON_START);
 			gbContext.direct.joypad_bits.select = gpio_get(GPIO_BUTTON_SELECT);
 
+            if ((gbContext.direct.joypad_bits.select == 0 && gbContext.direct.joypad_bits.down == 0)){
+                GlobalSoundSetOff();
+            } else if ((gbContext.direct.joypad_bits.select == 0 && gbContext.direct.joypad_bits.up == 0))
+            {
+               GlobalSoundSetOn();
+            }
+
         } while (!(gbContext.direct.joypad_bits.a == 0 && gbContext.direct.joypad_bits.b == 0));
+
+        /* Save File */
+        write_cart_ram_file(&gbContext);
 
         // Reset core1 and reset to bootloader
         multicore_reset_core1();

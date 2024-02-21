@@ -1,0 +1,1 @@
+xxd -i rom.gb > rom.c

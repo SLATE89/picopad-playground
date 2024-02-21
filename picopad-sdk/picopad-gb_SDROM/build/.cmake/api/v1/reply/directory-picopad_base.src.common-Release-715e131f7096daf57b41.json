@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "picopad_base/src/common",
+		"source" : "C:/Workspace/Programming/picopad-base/src/common"
+	}
+}

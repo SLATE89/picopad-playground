@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.13)
 
-set(PICO_TOOLCHAIN_PATH /Applications/ARM)
-set(PICO_SDK_PATH ../../pico-sdk)
-set(PICOPAD_BASE_PATH ../../picopad-base)
+set(PICO_TOOLCHAIN_PATH "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/gcc-arm-none-eabi")
+set(PICO_SDK_PATH "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/pico-sdk")
+set(PICOPAD_BASE_PATH "C:/Workspace/Programming/picopad-base")
 
 set(CMAKE_SIZE ${PICO_TOOLCHAIN_PATH}/bin/arm-none-eabi-size)
 
